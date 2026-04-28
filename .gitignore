@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Secrets
+.env
+
+# Databases
+chroma_db/
+*.json
+!agents_config.json
+
+# Logs
+*.log
+
+# Project specific
+data/
+scratch/
+temp_hermes/

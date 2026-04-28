@@ -1,0 +1,16 @@
+fastapi
+uvicorn
+python-dotenv
+apify-client
+jugaad-data
+nselib
+nsepy
+chromadb
+sentence-transformers
+pandas
+numpy
+httpx
+apscheduler
+hermes-agent @ git+https://github.com/nousresearch/hermes-agent.git
+youtube-transcript-api
+
