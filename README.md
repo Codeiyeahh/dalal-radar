@@ -10,27 +10,27 @@ Dalal Radar is an autonomous intelligence engine that scrapes Indian stock marke
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        DALAL RADAR ENGINE                          │
+│                        DALAL RADAR ENGINE                           │
 ├─────────────────────────────────────────────────────────────────────┤
 │                                                                     │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
-│  │  YouTube      │    │  Market      │    │  Feedback            │  │
-│  │  Agent        │    │  Agent       │    │  Agent               │  │
-│  │              │    │              │    │                      │  │
-│  │  • Apify      │    │  • nselib    │    │  • Log interactions  │  │
-│  │  • 100 videos │    │  • jugaad    │    │  • Accept ratings    │  │
-│  │  • Transcripts│    │  • httpx     │    │  • LLM rewrite on   │  │
-│  │  • LLM        │    │  • Bulk/Block│    │    poor feedback     │  │
-│  │    sentiment  │    │    deals     │    │  • Stats dashboard   │  │
-│  └──────┬───────┘    └──────┬───────┘    └──────────┬───────────┘  │
+│  ┌──────────────┐     ┌──────────────┐    ┌──────────────────────┐  │
+│  │  YouTube     │     │  Market      │    │  Feedback            │  │
+│  │  Agent       │     │  Agent       │    │  Agent               │  │
+│  │              │     │              │    │                      │  │
+│  │  • Apify     │     │  • nselib    │    │  • Log interactions  │  │
+│  │  • 100 videos│     │  • jugaad    │    │  • Accept ratings    │  │
+│  │ • Transcripts│     │  • httpx     │    │  • LLM rewrite on    │  │
+│  │  • LLM       │     │  • Bulk/Block│    │    poor feedback     │  │
+│  │    sentiment │     │    deals     │    │  • Stats dashboard   │  │
+│  └──────┬───────┘     └──────┬───────┘    └──────────┬───────────┘  │
 │         │                   │                       │               │
 │         ▼                   ▼                       │               │
 │  ┌────────────────────────────────┐                 │               │
 │  │         PIPELINE               │                 │               │
 │  │                                │                 │               │
-│  │  Chunker ──► Embedder ──► ChromaDB              │               │
-│  │  (sentence   (MiniLM-L6)  (persistent)          │               │
-│  │   boundaries, 384-dim      cosine               │               │
+│  │  Chunker ──► Embedder ──► ChromaDB               │               │
+│  │  (sentence   (MiniLM-L6)  (persistent)           │               │
+│  │   boundaries, 384-dim      cosine                │               │
 │  │   400 tokens)  vectors     similarity)           │               │
 │  └────────────────┬───────────────┘                 │               │
 │                   │                                 │               │

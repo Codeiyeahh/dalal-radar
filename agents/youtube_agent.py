@@ -26,6 +26,7 @@ from typing import Optional
 import httpx
 from apify_client import ApifyClient
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.proxies import WebshareProxyConfig
 
 
 # ---------------------------------------------------------------------------
@@ -286,12 +287,26 @@ def fetch_transcripts(videos: list[dict]) -> dict[str, str]:
     missing_ids = [v["video_id"] for v in videos if v["video_id"] not in transcripts]
     if missing_ids:
         logger.info("  Attempting local fallback for %d missing transcript(s)...", len(missing_ids))
-        api = YouTubeTranscriptApi()
+        
+        # Configure Proxies
+        webshare_user = os.getenv("WEBSHARE_USERNAME", "")
+        webshare_pass = os.getenv("WEBSHARE_PASSWORD", "")
+        
+        if webshare_user and webshare_pass:
+            logger.info("  Using Webshare proxies for local fallback...")
+            proxy_config = WebshareProxyConfig(
+                proxy_username=webshare_user,
+                proxy_password=webshare_pass
+            )
+            api = YouTubeTranscriptApi(proxies=proxy_config)
+        else:
+            logger.warning("  WEBSHARE credentials not found. Using direct connection (may be blocked).")
+            api = YouTubeTranscriptApi()
+
         for vid_id in missing_ids:
             try:
                 # Local library fallback with language support (English and Hindi)
-                # In version 1.2.4, use api.fetch() instead of get_transcript()
-                srt_obj = api.fetch(vid_id, languages=['en', 'hi'])
+                srt_obj = api.fetch(vid_id, languages=['en', 'hi', 'en-IN'])
                 srt = srt_obj.to_raw_data()
                 text = " ".join([entry['text'] for entry in srt])
                 if text.strip():
@@ -576,8 +591,20 @@ if __name__ == "__main__":
     print("\n[0] Testing youtube-transcript-api directly (dVd9kdTTLLo) …")
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        api = YouTubeTranscriptApi()
-        test_transcript_obj = api.fetch('dVd9kdTTLLo', languages=['en', 'hi'])
+        from youtube_transcript_api.proxies import WebshareProxyConfig
+        
+        web_u = os.getenv("WEBSHARE_USERNAME", "")
+        web_p = os.getenv("WEBSHARE_PASSWORD", "")
+        
+        if web_u and web_p:
+            print("    Configuring Webshare proxies for test...")
+            p_config = WebshareProxyConfig(proxy_username=web_u, proxy_password=web_p)
+            ytt_api = YouTubeTranscriptApi(proxies=p_config)
+        else:
+            print("    No Webshare credentials. Testing direct connection...")
+            ytt_api = YouTubeTranscriptApi()
+            
+        test_transcript_obj = ytt_api.fetch('dVd9kdTTLLo', languages=['en', 'hi', 'en-IN'])
         test_transcript = test_transcript_obj.to_raw_data()
         print(f"    Success! First 3 lines: {test_transcript[:3]}")
     except Exception as exc:
