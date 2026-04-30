@@ -38,7 +38,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 # Ensure tools are registered with Hermes
 import agents.market_agent
 import agents.youtube_agent
-from config import OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL, logger
+from config import OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL, FALLBACK_MODELS, logger
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -70,27 +70,19 @@ _RECOMMENDATION_PROMPT_TEMPLATE = (
 # Minimum number of agreeing sources before a recommendation is generated
 _MIN_SOURCES_FOR_REC = 3
 
-
-# ---------------------------------------------------------------------------
-# OpenRouter helper
-# ---------------------------------------------------------------------------
-
 def _call_llm(
     messages: list[dict],
     temperature: float = 0.1,
     max_tokens: int = 1024,
 ) -> str:
     """
-    Send a chat-completion request to OpenRouter and return the
-    assistant's content string.
+    Send a chat-completion request to OpenRouter with fallback model support.
     """
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to your .env file.")
+
     # Rate limit handling: 8 second sleep between calls
     time.sleep(8)
-
-    if not OPENROUTER_API_KEY:
-        raise RuntimeError(
-            "OPENROUTER_API_KEY is not set. Add it to your .env file."
-        )
 
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
@@ -99,28 +91,47 @@ def _call_llm(
         "X-Title": "Dalal Radar",
     }
 
-    payload = {
-        "model": _LLM_MODEL,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+    # Build the model list to try: [Primary, Fallback 1, Fallback 2, ...]
+    models_to_try = [OPENROUTER_MODEL]
+    for fm in FALLBACK_MODELS:
+        if fm not in models_to_try:
+            models_to_try.append(fm)
 
-    endpoint = _OPENROUTER_URL
+    endpoint = OPENROUTER_BASE_URL
     if not endpoint.endswith("/chat/completions"):
         endpoint = endpoint.rstrip("/") + "/chat/completions"
 
-    with httpx.Client(timeout=60) as client:
-        resp = client.post(endpoint, headers=headers, json=payload)
-        resp.raise_for_status()
+    last_error = None
+    for model in models_to_try:
+        try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
 
-    data = resp.json()
-    content = (
-        data.get("choices", [{}])[0]
-        .get("message", {})
-        .get("content", "")
-    )
-    return content.strip()
+            with httpx.Client(timeout=60) as client:
+                resp = client.post(endpoint, headers=headers, json=payload)
+                
+                # Try fallback on any 4xx error
+                if 400 <= resp.status_code < 500:
+                    logger.warning("Model %s returned %d. Trying fallback...", model, resp.status_code)
+                    continue
+                
+                resp.raise_for_status()
+
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if content:
+                logger.info("Using model: %s", model)
+                return content.strip()
+            
+        except Exception as e:
+            last_error = e
+            logger.warning("Model %s failed: %s. Trying next...", model, e)
+
+    raise RuntimeError(f"All models failed. Last error: {last_error}")
 
 
 # ---------------------------------------------------------------------------

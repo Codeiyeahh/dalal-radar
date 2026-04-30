@@ -25,7 +25,7 @@ import httpx
 # Bootstrap path so we can import config when run as __main__
 # ---------------------------------------------------------------------------
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL, logger  # noqa: E402
+from config import OPENROUTER_API_KEY, OPENROUTER_MODEL, OPENROUTER_BASE_URL, FALLBACK_MODELS, logger  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -83,9 +83,71 @@ def _find_session(store: dict, session_id: str) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Hermes Agent Helper
+# LLM Logic
 # ---------------------------------------------------------------------------
-from agents.chat_agent import get_agent
+
+def _call_llm(
+    messages: list[dict],
+    temperature: float = 0.1,
+    max_tokens: int = 1024,
+) -> str:
+    """
+    Send a chat-completion request to OpenRouter with fallback model support.
+    """
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not set. Add it to your .env file.")
+
+    # Rate limit handling: 8 second sleep between calls
+    time.sleep(8)
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://github.com/dalal-radar",
+        "X-Title": "Dalal Radar",
+    }
+
+    # Build the model list to try: [Primary, Fallback 1, Fallback 2, ...]
+    models_to_try = [OPENROUTER_MODEL]
+    for fm in FALLBACK_MODELS:
+        if fm not in models_to_try:
+            models_to_try.append(fm)
+
+    endpoint = OPENROUTER_BASE_URL
+    if not endpoint.endswith("/chat/completions"):
+        endpoint = endpoint.rstrip("/") + "/chat/completions"
+
+    last_error = None
+    for model in models_to_try:
+        try:
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+
+            with httpx.Client(timeout=60) as client:
+                resp = client.post(endpoint, headers=headers, json=payload)
+                
+                # Try fallback on any 4xx error
+                if 400 <= resp.status_code < 500:
+                    logger.warning("Model %s returned %d. Trying fallback...", model, resp.status_code)
+                    continue
+                
+                resp.raise_for_status()
+
+            data = resp.json()
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if content:
+                logger.info("Using model: %s", model)
+                return content.strip()
+            
+        except Exception as e:
+            last_error = e
+            logger.warning("Model %s failed: %s. Trying next...", model, e)
+
+    raise RuntimeError(f"All models failed. Last error: {last_error}")
 
 
 # ---------------------------------------------------------------------------
@@ -238,13 +300,11 @@ def improve_response(session: dict) -> str:
     )
 
     try:
-        agent = get_agent()
-        agent.ephemeral_system_prompt = _IMPROVE_SYSTEM_PROMPT
-        # Rate limit handling: 8 second sleep before LLM call
-        time.sleep(8)
-        response_dict = agent.run_conversation(user_message=user_msg)
-
-        improved = response_dict.get("content", "")
+        messages = [
+            {"role": "system", "content": _IMPROVE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_msg}
+        ]
+        improved = _call_llm(messages=messages)
     except Exception as exc:
         logger.error("improve_response LLM call failed: %s", exc)
         improved = "(Improvement failed — please try again later.)"
