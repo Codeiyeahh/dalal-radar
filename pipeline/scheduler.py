@@ -203,11 +203,11 @@ def start_scheduler() -> None:
         logger.info("Scheduler started — no jobs queued (unexpected)")
 
     # Immediate first run
-    logger.info("Triggering immediate pipeline run …")
-    try:
-        run_full_pipeline()
-    except Exception as exc:
-        logger.error("Immediate pipeline run failed: %s", exc)
+    # logger.info("Triggering immediate pipeline run …")
+    # try:
+    #     run_full_pipeline()
+    # except Exception as exc:
+    #     logger.error("Immediate pipeline run failed: %s", exc)
 
 
 def stop_scheduler() -> None:

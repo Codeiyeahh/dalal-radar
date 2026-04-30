@@ -134,6 +134,32 @@ def _call_llm(
     raise RuntimeError(f"All models failed. Last error: {last_error}")
 
 
+def _call_llm_with_retry(
+    messages: list[dict],
+    temperature: float = 0.1,
+    max_tokens: int = 1024,
+    max_retries: int = 5,
+) -> str:
+    """
+    Wrapper for _call_llm that adds exponential backoff specifically for 429 (Rate Limit) errors.
+    """
+    for attempt in range(max_retries):
+        try:
+            return _call_llm(messages, temperature, max_tokens)
+        except Exception as e:
+            # Check for 429 in error message or response code if available
+            if "429" in str(e):
+                wait = 20 * (attempt + 1)  # 20s, 40s, 60s, 80s, 100s
+                logger.warning("Rate limited (429), waiting %ds before retry (attempt %d/%d)...", 
+                               wait, attempt + 1, max_retries)
+                time.sleep(wait)
+            else:
+                # Re-raise other errors immediately
+                raise e
+    
+    raise RuntimeError(f"Max retries exceeded for LLM call after {max_retries} attempts due to rate limiting.")
+
+
 # ---------------------------------------------------------------------------
 # STEP 1 — Extract tickers from query
 # ---------------------------------------------------------------------------
@@ -146,7 +172,7 @@ def _extract_tickers(query: str) -> list[str]:
     logger.info("STEP 1 — Extracting tickers from query …")
 
     try:
-        raw = _call_llm([
+        raw = _call_llm_with_retry([
             {"role": "system", "content": _TICKER_EXTRACT_PROMPT},
             {"role": "user", "content": query},
         ])
@@ -302,11 +328,9 @@ def _generate_answer(
     context_str: str,
     conversation_history: list[dict],
 ) -> str:
-    """Call the LLM with system prompt, conversation history, and context using Hermes AIAgent."""
-    logger.info("STEP 4 — Generating grounded answer using Hermes AIAgent …")
+    """Call the LLM with system prompt, conversation history, and context."""
+    logger.info("STEP 4 — Generating grounded answer …")
 
-    agent = get_agent()
-    
     # Combine original system prompt with the dynamically retrieved context
     system_prompt = (
         f"{_SYSTEM_PROMPT}\n\n"
@@ -316,21 +340,15 @@ def _generate_answer(
         f"{'─' * 50}"
     )
     
-    # We use ephemeral system prompt to dynamically inject RAG context
-    agent.ephemeral_system_prompt = system_prompt
-
-    # Rate limit handling: 8 second sleep before Hermes agent conversation
-    time.sleep(8)
-
+    messages = [{"role": "system", "content": system_prompt}]
+    if conversation_history:
+        messages.extend(conversation_history)
+    messages.append({"role": "user", "content": query})
 
     try:
-        response_dict = agent.run_conversation(
-            user_message=query,
-            conversation_history=conversation_history
-        )
-        answer = response_dict.get("content", "")
+        answer = _call_llm_with_retry(messages)
     except Exception as exc:
-        logger.error("  AIAgent call failed: %s", exc)
+        logger.error("  Answer generation failed: %s", exc)
         answer = "I'm sorry, I encountered an error generating the answer."
 
     logger.info("  Answer generated (%d chars)", len(answer))
@@ -427,7 +445,7 @@ def _generate_recommendation(
             )
 
             try:
-                reasoning = _call_llm([
+                reasoning = _call_llm_with_retry([
                     {"role": "system", "content": prompt},
                     {"role": "user", "content": summary},
                 ], temperature=0.2, max_tokens=512)

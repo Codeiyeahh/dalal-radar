@@ -600,26 +600,6 @@ def extract_sentiment_from_description(video_meta: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 from agents.hermes_utils import tool
 
-def _analyze_single_video(meta: dict, transcripts: dict[str, str]) -> tuple[list[dict], str]:
-    """Worker function to analyze a single video (transcript or description)."""
-    vid_id = meta["video_id"]
-    transcript = transcripts.get(vid_id)
-    
-    if transcript:
-        try:
-            # Try transcript analysis first
-            results = extract_ticker_sentiment(transcript, meta)
-            for r in results:
-                r['source_type'] = 'transcript'
-            return results, 'transcript'
-        except Exception as e:
-            logger.warning(f"    Transcript analysis failed for {vid_id}: {e}")
-            
-    # Fallback to description analysis
-    results = extract_sentiment_from_description(meta)
-    return results, 'description'
-
-
 @tool(
     name="run_youtube_pipeline",
     description="Fetch recent YouTube videos and extract stock sentiment using an LLM.",
@@ -632,7 +612,7 @@ def _analyze_single_video(meta: dict, transcripts: dict[str, str]) -> tuple[list
 )
 def run_youtube_pipeline() -> list[dict]:
     """
-    Orchestrates the full YouTube sentiment pipeline using parallel execution.
+    Orchestrates the full YouTube sentiment pipeline using sequential analysis.
     """
     logger.info("=" * 60)
     logger.info("  YouTube Pipeline — Starting")
@@ -647,28 +627,40 @@ def run_youtube_pipeline() -> list[dict]:
     # Step 2 — fetch transcripts (Parallel)
     transcripts = _retry_with_backoff(fetch_transcripts, videos)
 
-    # Step 3 — Sentiment Analysis (Parallel)
+    # Step 3 — Sentiment Analysis (Sequential)
     all_sentiments: list[dict] = []
     from_transcripts = 0
     from_descriptions = 0
     
     total_videos = len(videos)
-    logger.info("STEP 3 — Analyzing %d videos in parallel …", total_videos)
+    logger.info("STEP 3 — Analyzing %d videos sequentially …", total_videos)
 
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {
-            executor.submit(_analyze_single_video, meta, transcripts): meta 
-            for meta in videos
-        }
-        for future in as_completed(futures):
-            results, source = future.result()
-            all_sentiments.extend(results)
-            if source == 'transcript':
+    for idx, meta in enumerate(videos, 1):
+        vid_id = meta["video_id"]
+        transcript = transcripts.get(vid_id)
+        
+        logger.info("[%d/%d] Analyzing: %s", idx, total_videos, 
+                    meta.get("title", "?")[:50])
+        
+        if transcript:
+            try:
+                results = extract_ticker_sentiment(transcript, meta)
+                for r in results:
+                    r['source_type'] = 'transcript'
+                all_sentiments.extend(results)
                 from_transcripts += len(results)
-            else:
+            except Exception as exc:
+                logger.error("Transcript analysis failed: %s", exc)
+                results = extract_sentiment_from_description(meta)
+                all_sentiments.extend(results)
                 from_descriptions += len(results)
-            
-            logger.info(f"    Finished processing video. Tickers found: {len(results)} ({source})")
+        else:
+            results = extract_sentiment_from_description(meta)
+            all_sentiments.extend(results)
+            from_descriptions += len(results)
+        
+        # Rate limit: wait 15 seconds between each LLM call
+        time.sleep(15)
 
     logger.info("=" * 60)
     logger.info(
