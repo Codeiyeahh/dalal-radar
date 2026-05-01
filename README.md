@@ -17,11 +17,11 @@ Dalal Radar is an autonomous intelligence engine that scrapes Indian stock marke
 │  │  YouTube     │     │  Market      │    │  Feedback            │  │
 │  │  Agent       │     │  Agent       │    │  Agent               │  │
 │  │              │     │              │    │                      │  │
-│  │  • Apify     │     │  • nselib    │    │  • Log interactions  │  │
-│  │  • 100 videos│     │  • jugaad    │    │  • Accept ratings    │  │
-│  │ • Transcripts│     │  • httpx     │    │  • LLM rewrite on    │  │
-│  │  • LLM       │     │  • Bulk/Block│    │    poor feedback     │  │
-│  │    sentiment │     │    deals     │    │  • Stats dashboard   │  │
+│  │  • Sequential│     │  • nselib    │    │  • Log interactions  │  │
+│  │  • 15s Sleep │     │  • jugaad    │    │  • Accept ratings    │  │
+│  │ • Transcripts│     │  • httpx     │    │  • LLM fallback      │  │
+│  │  • 4xx Retry │     │  • Bulk/Block│    │    rotation          │  │
+│  │    fallback  │     │    deals     │    │  • Stats dashboard   │  │
 │  └──────┬───────┘     └──────┬───────┘    └──────────┬───────────┘  │
 │         │                   │                       │               │
 │         ▼                   ▼                       │               │
@@ -40,7 +40,7 @@ Dalal Radar is an autonomous intelligence engine that scrapes Indian stock marke
 │  │                                                │                 │
 │  │  Query ──► Ticker Extract ──► Vector Search    │                 │
 │  │         ──► Context Build  ──► LLM Answer      │                 │
-│  │         ──► Citation Parse ──► Recommendation  │                 │
+│  │         ──► Exponential Backoff (429)          │                 │
 │  └────────────────┬───────────────────────────────┘                 │
 │                   │                                                 │
 │                   ▼                                                 │
@@ -51,10 +51,23 @@ Dalal Radar is an autonomous intelligence engine that scrapes Indian stock marke
 │  └────────────────────────────────────────────────────────────────┘ │
 │                                                                     │
 │  ┌────────────────────────────────────────────────────────────────┐ │
-│  │  Scheduler (APScheduler · 24h cycle · auto-refresh)           │ │
+│  │  Scheduler (APScheduler · 24h cycle · Instant Startup)        │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 🛡️ Radar Resilience (New)
+
+To ensure high availability and bypass API rate limits on free-tier providers, Dalal Radar now includes:
+
+- **Multi-Model Fallback**: If the primary model (`Gemma-4-31b`) returns a `4xx` error, the engine automatically rotates through a prioritized list of fallbacks: `DeepSeek-R1` → `DeepSeek-Chat` → `Qwen-3-8b`.
+- **Intelligent Backoff**: 
+  - **Chat Agent**: Uses exponential backoff (20s, 40s, 60s...) specifically for `429 Too Many Requests` errors.
+  - **YouTube Pipeline**: Processed sequentially with a mandatory **15-second delay** between LLM calls to respect API quotas.
+- **Instant Server Startup**: The server is ready to accept requests immediately. The background scheduler no longer blocks startup with an initial pipeline run.
+- **Unified Logic**: Resilient LLM handling is standardized across YouTube, Chat, and Feedback modules.
 
 ---
 
@@ -90,6 +103,7 @@ Open `.env` and fill in your API keys:
 ```env
 APIFY_TOKEN=your_apify_token_here
 OPENROUTER_API_KEY=your_openrouter_key_here
+OPENROUTER_MODEL=google/gemma-4-31b-it:free
 ```
 
 ### 4. Run the data pipeline (first-time ingestion)
@@ -98,7 +112,7 @@ OPENROUTER_API_KEY=your_openrouter_key_here
 python -m pipeline.scheduler
 ```
 
-This fetches live NSE deals and YouTube sentiment data, chunks it, embeds it, and stores everything in ChromaDB. Takes 5–15 minutes depending on API speeds.
+This fetches live NSE deals and YouTube sentiment data, chunks it, embeds it, and stores everything in ChromaDB. Takes 15–30 minutes (rate-limit optimized).
 
 ### 5. Start the API server
 
@@ -107,8 +121,6 @@ uvicorn api.main:app --reload
 ```
 
 The server starts at `http://localhost:8000` with auto-docs at `/docs`.
-
-> **Note:** The 24-hour background scheduler starts automatically with the API server, so the data stays fresh without manual re-runs.
 
 ---
 
@@ -189,14 +201,15 @@ curl http://localhost:8000/health
 
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
-| **LLM** | OpenRouter (Mistral-7B-Instruct) | Sentiment extraction, ticker parsing, answer generation |
+| **Primary LLM** | google/gemma-4-31b-it:free | Core sentiment extraction and RAG answer generation |
+| **Fallback LLMs**| DeepSeek-R1 · DeepSeek-Chat · Qwen-3 | Redundant models for high-availability |
 | **Scraping** | Apify (youtube-scraper, transcript-scraper) | YouTube video discovery + transcript fetching |
 | **Market Data** | nselib · jugaad-data · httpx | NSE bulk/block deals with triple-fallback |
 | **Embeddings** | sentence-transformers (all-MiniLM-L6-v2) | 384-dim vector embeddings for semantic search |
 | **Vector DB** | ChromaDB (persistent) | Cosine similarity retrieval with metadata filtering |
 | **API** | FastAPI + Uvicorn | REST endpoints with Pydantic validation |
 | **Scheduler** | APScheduler | 24-hour automated pipeline refresh |
-| **Data Processing** | Pandas · NumPy | Deal normalization and data wrangling |
+| **Resilience** | Custom exponential backoff | Protection against API rate-limiting (429) |
 
 ---
 
@@ -206,16 +219,16 @@ curl http://localhost:8000/health
 dalal-radar/
 ├── agents/
 │   ├── __init__.py
-│   ├── chat_agent.py          # RAG chatbot with citations + recommendations
-│   ├── feedback_agent.py      # Closed learning loop with LLM rewrite
+│   ├── chat_agent.py          # RAG chatbot with backoff + fallbacks
+│   ├── feedback_agent.py      # Resilient closed learning loop
 │   ├── market_agent.py        # NSE bulk/block deal fetcher (3 fallbacks)
-│   └── youtube_agent.py       # YouTube scraper + LLM sentiment pipeline
+│   └── youtube_agent.py       # Sequential pipeline with rate-limit protection
 │
 ├── pipeline/
 │   ├── __init__.py
 │   ├── chunker.py             # Sentence-boundary text chunking
 │   ├── embedder.py            # MiniLM-L6-v2 embedding (cached singleton)
-│   └── scheduler.py           # 24h APScheduler + 7-step orchestrator
+│   └── scheduler.py           # 24h APScheduler + Instant Startup
 │
 ├── retrieval/
 │   ├── __init__.py
@@ -241,12 +254,20 @@ dalal-radar/
 ## 🔄 How It Works
 
 1. **Every 24 hours**, the scheduler triggers the full pipeline:
-   - Scrapes ~100 Indian trading YouTube videos published in the last 24h
-   - Fetches transcripts via Apify
-   - Runs Mistral-7B to extract ticker-level sentiment (bullish/bearish/neutral)
-   - Fetches NSE bulk & block deals with a 3-strategy fallback (nselib → jugaad-data → raw httpx)
-   - Chunks everything on sentence boundaries (~400 tokens, 50-token overlap)
-   - Generates 384-dim embeddings and stores in ChromaDB
+   - Scrapes ~100 Indian trading YouTube videos published in the last 24h.
+   - Fetches transcripts via Apify.
+   - Runs **Gemma-4-31b** (sequentially with 15s delays) to extract ticker-level sentiment.
+   - Fetches NSE bulk & block deals with a 3-strategy fallback.
+   - Chunks everything on sentence boundaries (~400 tokens).
+   - Generates 384-dim embeddings and stores in ChromaDB.
+
+2. **When a user asks a question**, the chat agent:
+   - Extracts mentioned tickers from the query using LLM.
+   - Retrieves relevant chunks via cosine similarity + metadata filtering.
+   - Generates a grounded answer citing specific channels and URLs.
+   - Includes **exponential backoff** to handle any API rate limits during peak usage.
+
+3. **Feedback loop**: Users rate responses 1–5. Poor ratings auto-trigger a resilient LLM rewrite using the original context, creating a self-improving system that doesn't break if a specific model is down.
 
 2. **When a user asks a question**, the chat agent:
    - Extracts mentioned tickers from the query using LLM

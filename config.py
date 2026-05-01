@@ -3,17 +3,24 @@ Configuration and logging setup for the project.
 """
 import os
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Find .env file relative to this config.py file
+BASE_DIR = Path(__file__).resolve().parent
+env_path = BASE_DIR / '.env'
+load_dotenv(dotenv_path=env_path)
 
 APIFY_TOKEN = os.getenv("APIFY_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-lite:free")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-FALLBACK_MODELS = ["google/gemma-4-31b-it:free"]
+FALLBACK_MODELS = [
+    "llama-3.1-8b-instant",
+    "llama3-8b-8192",
+    "gemma2-9b-it"
+]
 
 def setup_logging():
     """

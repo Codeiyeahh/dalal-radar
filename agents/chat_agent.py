@@ -347,9 +347,10 @@ def _generate_answer(
 
     try:
         answer = _call_llm_with_retry(messages)
-    except Exception as exc:
-        logger.error("  Answer generation failed: %s", exc)
-        answer = "I'm sorry, I encountered an error generating the answer."
+    except Exception as e:
+        logger.error("LLM generation failed: %s", str(e))
+        logger.error("Full error: %s", repr(e))
+        return f"Error: {str(e)}"
 
     logger.info("  Answer generated (%d chars)", len(answer))
     return answer

@@ -6,10 +6,14 @@ load_dotenv()
 key = os.getenv('OPENROUTER_API_KEY')
 
 models = [
-    'google/gemma-4-31b-it:free',
-    'deepseek/deepseek-r1:free',
-    'deepseek/deepseek-chat:free',
-    'qwen/qwen3-8b:free'
+    'google/gemma-3-27b-it:free',
+    'google/gemma-3-12b-it:free', 
+    'google/gemma-3-4b-it:free',
+    'microsoft/phi-4-reasoning-plus:free',
+    'qwen/qwen3-14b:free',
+    'qwen/qwen3-30b-a3b:free',
+    'mistralai/devstral-small:free',
+    'tngtech/deepseek-r1t-chimera:free'
 ]
 
 for model in models:

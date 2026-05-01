@@ -659,8 +659,8 @@ def run_youtube_pipeline() -> list[dict]:
             all_sentiments.extend(results)
             from_descriptions += len(results)
         
-        # Rate limit: wait 15 seconds between each LLM call
-        time.sleep(15)
+        # Rate limit: wait 3 seconds between each LLM call
+        time.sleep(3)
 
     logger.info("=" * 60)
     logger.info(
